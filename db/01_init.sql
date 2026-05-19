@@ -1,0 +1,26 @@
+CREATE TABLE IF NOT EXISTS projects (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id SERIAL PRIMARY KEY,
+  project_id INT REFERENCES projects(id) ON DELETE CASCADE,
+  title VARCHAR(200) NOT NULL,
+  status VARCHAR(20) DEFAULT 'pendiente',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS members (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  email VARCHAR(150) UNIQUE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_assignments (
+  task_id INT REFERENCES tasks(id) ON DELETE CASCADE,
+  member_id INT REFERENCES members(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_id, member_id)
+);
