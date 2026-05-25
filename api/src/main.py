@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from src.routers import health, projects, tasks
+
+load_dotenv()
 
 app = FastAPI()
 

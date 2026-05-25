@@ -15,21 +15,33 @@ services:
     ports:
       - "${API_PORT}:4000"
     environment:
-      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      - DATABASE_URL=${DATABASE_URL}
       - PORT=${API_PORT}
     depends_on:
       - db
 
   db:
-    image: postgres:16
+    container_name: ${POSTGRES_CONTAINER_NAME}
+    image: ${POSTGRES_IMAGE}
+    env_file:
+      - .env
     environment:
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=${DB_NAME}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_CONTAINER_PORT}"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
-      - ./db/02_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+      - db_data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -p $${POSTGRES_CONTAINER_PORT}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
 volumes:
-  pgdata:
+  db_data:
+    name: ${POSTGRES_DATA_VOLUME}

@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 type Project = {
@@ -16,63 +16,129 @@ type Task = {
   status: TaskStatus;
 };
 
-const initialProjects: Project[] = [
-  {
-    id: 1,
-    name: 'Portal interno',
-    description: 'Centraliza solicitudes y trabajo diario del equipo.',
-  },
-  {
-    id: 2,
-    name: 'Demo Docker Compose',
-    description: 'Laboratorio para demostrar frontend, API y base de datos.',
-  },
-  {
-    id: 3,
-    name: 'Lanzamiento Q3',
-    description: 'Preparativos visuales y operativos para el siguiente ciclo.',
-  },
-];
+const API_URL = (import.meta as ImportMeta).env?.VITE_API_URL ?? 'http://localhost:4000';
 
-const initialTasks: Task[] = [
-  { id: 1, projectId: 1, title: 'Definir prioridades semanales', status: 'pendiente' },
-  { id: 2, projectId: 1, title: 'Revisar backlog de soporte', status: 'completada' },
-  { id: 3, projectId: 2, title: 'Validar persistencia del volumen', status: 'pendiente' },
-  { id: 4, projectId: 2, title: 'Crear seed inicial', status: 'pendiente' },
-  { id: 5, projectId: 3, title: 'Alinear entregables con diseño', status: 'completada' },
-];
+type ApiProject = {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: string;
+};
+
+type ApiTask = {
+  id: number;
+  project_id: number;
+  title: string;
+  status: TaskStatus;
+  created_at: string;
+};
+
+const mapProject = (project: ApiProject): Project => ({
+  id: project.id,
+  name: project.name,
+  description: project.description ?? '',
+});
+
+const mapTask = (task: ApiTask): Task => ({
+  id: task.id,
+  projectId: task.project_id,
+  title: task.title,
+  status: task.status,
+});
+
+const fetchJson = async <T,>(url: string, options?: RequestInit): Promise<T> => {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`Error ${response.status} al llamar ${url}`);
+  }
+  return (await response.json()) as T;
+};
 
 function App() {
-  const [projects, setProjects] = useState<Project[]>(initialProjects);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
-  const [nextProjectId, setNextProjectId] = useState(4);
-  const [nextTaskId, setNextTaskId] = useState(6);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const toggleTaskStatus = (taskId: number) => {
-    setTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.id === taskId
-          ? { ...task, status: task.status === 'pendiente' ? 'completada' : 'pendiente' }
-          : task,
-      ),
-    );
+  const loadTasks = async (projectId: number) => {
+    const data = await fetchJson<ApiTask[]>(`${API_URL}/api/projects/${projectId}/tasks`);
+    const mapped = data.map(mapTask);
+    setTasks((currentTasks) => {
+      const remaining = currentTasks.filter((task) => task.projectId !== projectId);
+      return [...remaining, ...mapped];
+    });
   };
 
-  const createProject = (name: string, description: string) => {
-    setProjects((currentProjects) => [
-      { id: nextProjectId, name, description },
-      ...currentProjects,
-    ]);
-    setNextProjectId((currentValue) => currentValue + 1);
+  const loadProjects = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchJson<ApiProject[]>(`${API_URL}/api/projects`);
+      const mapped = data.map(mapProject);
+      setProjects(mapped);
+      await Promise.all(mapped.map((project) => loadTasks(project.id)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al cargar proyectos.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const createTask = (projectId: number, title: string) => {
-    setTasks((currentTasks) => [
-      ...currentTasks,
-      { id: nextTaskId, projectId, title, status: 'pendiente' },
-    ]);
-    setNextTaskId((currentValue) => currentValue + 1);
+  useEffect(() => {
+    loadProjects();
+  }, []);
+
+  const toggleTaskStatus = async (taskId: number) => {
+    const target = tasks.find((task) => task.id === taskId);
+    if (!target) {
+      return;
+    }
+    const nextStatus = target.status === 'pendiente' ? 'completada' : 'pendiente';
+    setError(null);
+    try {
+      const updated = await fetchJson<ApiTask>(`${API_URL}/api/tasks/${taskId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const mapped = mapTask(updated);
+      setTasks((currentTasks) =>
+        currentTasks.map((task) => (task.id === mapped.id ? mapped : task)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo actualizar la tarea.');
+    }
+  };
+
+  const createProject = async (name: string, description: string) => {
+    setError(null);
+    try {
+      const created = await fetchJson<ApiProject>(`${API_URL}/api/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
+      const mapped = mapProject(created);
+      setProjects((currentProjects) => [mapped, ...currentProjects]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo crear el proyecto.');
+    }
+  };
+
+  const createTask = async (projectId: number, title: string) => {
+    setError(null);
+    try {
+      const created = await fetchJson<ApiTask>(`${API_URL}/api/projects/${projectId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      const mapped = mapTask(created);
+      setTasks((currentTasks) => [...currentTasks, mapped]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo crear la tarea.');
+    }
   };
 
   return (
@@ -94,6 +160,16 @@ function App() {
         </header>
 
         <main className="flex-1">
+          {isLoading ? (
+            <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
+              Cargando datos desde la API...
+            </div>
+          ) : null}
+          {error ? (
+            <div className="mb-6 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 text-sm text-rose-100">
+              {error}
+            </div>
+          ) : null}
           <Routes>
             <Route
               path="/"
@@ -114,6 +190,7 @@ function App() {
                   projects={projects}
                   tasks={tasks}
                   onCreateTask={createTask}
+                  onLoadTasks={loadTasks}
                   onToggleTaskStatus={toggleTaskStatus}
                 />
               }
@@ -258,11 +335,13 @@ function ProjectTasksPage({
   projects,
   tasks,
   onCreateTask,
+  onLoadTasks,
   onToggleTaskStatus,
 }: {
   projects: Project[];
   tasks: Task[];
   onCreateTask: (projectId: number, title: string) => void;
+  onLoadTasks: (projectId: number) => void;
   onToggleTaskStatus: (taskId: number) => void;
 }) {
   const params = useParams();
@@ -270,6 +349,12 @@ function ProjectTasksPage({
   const projectId = Number(params.id);
   const project = projects.find((currentProject) => currentProject.id === projectId);
   const projectTasks = tasks.filter((task) => task.projectId === projectId);
+
+  useEffect(() => {
+    if (!Number.isNaN(projectId)) {
+      onLoadTasks(projectId);
+    }
+  }, [onLoadTasks, projectId]);
 
   if (!project || Number.isNaN(projectId)) {
     return (

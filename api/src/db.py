@@ -1,8 +1,8 @@
 import os
 from contextlib import contextmanager
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -11,9 +11,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def get_cursor():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set")
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor() as cur:
             yield cur
         conn.commit()
     except Exception:
